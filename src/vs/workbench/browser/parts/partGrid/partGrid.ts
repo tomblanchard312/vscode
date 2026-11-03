@@ -8,13 +8,26 @@ import { Direction, GridNode, isGridBranchNode, ISerializableView, ISerializedGr
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableMap, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { hasKey } from '../../../../base/common/types.js';
-import { IContentPart, IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
+import { GroupDirection, IContentPart, IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
+import { IEditorGroupView } from '../editor/editor.js';
 import { getGridEdgeInsets, IGridEdgeInsets, NO_GRID_EDGE_INSETS, updateGridGapSashes } from './partGridGap.js';
 
 /**
  * The class of the element of a {@link PartGrid}.
  */
 export const PART_GRID_CLASS = 'part-grid';
+
+/**
+ * The class of a cell at the top edge of its grid, with no visible cell above it, for what its owner shows there, such
+ * as the top row of a window, which moves the window.
+ */
+export const PART_GRID_TOP_EDGE_CLASS = 'part-grid-cell-top-edge';
+
+/**
+ * The class of an editor group whose title is at the top edge of its grid: a group at the top of a part in a cell at the
+ * top edge.
+ */
+export const PART_GRID_TOP_EDGE_GROUP_CLASS = 'part-grid-top-edge-group';
 
 /**
  * What a cell of a {@link PartGrid} shows that is not an editor part, such as
@@ -329,10 +342,26 @@ export class PartGrid extends Disposable {
 		part.groups.forEach(trackGroup);
 		disposables.add(part.onDidAddGroup(group => { trackGroup(group); update(); }));
 		disposables.add(part.onDidRemoveGroup(group => { groupListeners.deleteAndDispose(group); update(); }));
+		// Which of its groups are at its top changes with its groups.
+		const markTopEdgeGroups = () => this.markTopEdgeGroups(this.getCell(id));
+		disposables.add(Event.any(part.onDidAddGroup, part.onDidRemoveGroup, part.onDidMoveGroup)(markTopEdgeGroups));
 		disposables.add(part.onWillClose(() => this.removeCell(id)));
 
 		if (!hasEditors(part)) {
 			this.empty.add(id);
+		}
+	}
+
+	/** Marks the groups of the part of `cell` at its top, while the cell is at the top edge of the grid. */
+	private markTopEdgeGroups(cell: PartGridCell): void {
+		const part = cell.part;
+		if (!part) {
+			return;
+		}
+		const atTopEdge = cell.element.classList.contains(PART_GRID_TOP_EDGE_CLASS);
+		for (const group of part.groups) {
+			const element = (group as Partial<IEditorGroupView>).element;
+			element?.classList.toggle(PART_GRID_TOP_EDGE_GROUP_CLASS, atTopEdge && !part.findGroup({ direction: GroupDirection.UP }, group));
 		}
 	}
 
@@ -634,11 +663,17 @@ export class PartGrid extends Disposable {
 		let changed = false;
 		for (const cell of cells) {
 			if (cells.length > 1 && !grid.isViewVisible(cell)) {
+				// Hidden, it is at no edge.
+				cell.element.classList.remove(PART_GRID_TOP_EDGE_CLASS);
+				this.markTopEdgeGroups(cell);
 				continue;
 			}
 
 			const insets = cell.options.keepsNoGap ? NO_GRID_EDGE_INSETS : getGridEdgeInsets(grid, cell, this.gap, neighbor => grid.isViewVisible(neighbor) && !neighbor.options.keepsNoGap);
 			changed = cell.setInsets(insets) || changed;
+			// At the top edge of the grid: no visible cell above it, such as a row of the window's chrome.
+			cell.element.classList.toggle(PART_GRID_TOP_EDGE_CLASS, !grid.getNeighborViews(cell, Direction.Up, false).some(neighbor => grid.isViewVisible(neighbor)));
+			this.markTopEdgeGroups(cell);
 		}
 
 		updateGridGapSashes(grid, true);
