@@ -217,6 +217,9 @@ class PartGridCell implements ISerializableView {
 
 	layout(width: number, height: number, top: number, left: number): void {
 		this.lastLayout = { width, height, top, left };
+		// Laid out by the grid, the cell is where the grid puts it
+		this.previewLayout = undefined;
+		this.element.style.width = this.element.style.height = '';
 		// The look may draw the frame only once the styles of its window have loaded, after the insets were set.
 		const border = this.border;
 		const contentOwnsFrame = this.contentOwnsFrame;
@@ -227,6 +230,26 @@ class PartGridCell implements ISerializableView {
 		this.layoutCard();
 	}
 
+	private previewLayout: { readonly width: number; readonly height: number; readonly top: number; readonly left: number } | undefined;
+
+	/**
+	 * Lays the cell out at a size other than the grid gives it, moved by
+	 * `dx`/`dy` from where the grid puts it, such as while cards make way
+	 * for a dragged card; without a size, as the grid lays it out again.
+	 * The grid laying it out ends it.
+	 */
+	layoutPreview(preview: { readonly width: number; readonly height: number; readonly dx: number; readonly dy: number } | undefined): void {
+		const base = this.lastLayout;
+		if (!base || (!preview && !this.previewLayout)) {
+			return;
+		}
+
+		this.previewLayout = preview && { width: preview.width, height: preview.height, top: base.top + preview.dy, left: base.left + preview.dx };
+		this.element.style.width = preview ? `${preview.width}px` : '';
+		this.element.style.height = preview ? `${preview.height}px` : '';
+		this.layoutCard();
+	}
+
 	private layoutCard(): void {
 		const insets = this.cardInsets;
 		this.card.style.inset = `${insets.top}px ${insets.right}px ${insets.bottom}px ${insets.left}px`;
@@ -234,7 +257,7 @@ class PartGridCell implements ISerializableView {
 		this.card.style.setProperty('--part-grid-card-inset-right', `${insets.right}px`);
 		this.card.style.setProperty('--part-grid-card-inset-left', `${insets.left}px`);
 
-		const layout = this.lastLayout;
+		const layout = this.previewLayout ?? this.lastLayout;
 		if (!layout) {
 			return;
 		}
@@ -403,7 +426,7 @@ export class PartGrid extends Disposable {
 	private getReflowCells(): IPartGridReflowCell[] {
 		return Array.from(this.cells.values())
 			.filter(cell => this.grid?.isViewVisible(cell) && this.isCellVisible(cell.id))
-			.map(cell => ({ id: cell.id, element: cell.element, card: cell.cardElement, isPart: !!cell.part, setContentVisible: visible => cell.setVisible(visible) }));
+			.map(cell => ({ id: cell.id, element: cell.element, card: cell.cardElement, isPart: !!cell.part, setContentVisible: visible => cell.setVisible(visible), layoutPreview: preview => cell.layoutPreview(preview) }));
 	}
 
 	/**
